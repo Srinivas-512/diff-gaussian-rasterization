@@ -360,10 +360,15 @@ __global__ void preprocessCUDA(
 	glm::vec3* dL_dmeans,
 	float* dL_dcolor,
 	float* dL_ddepth,
+	float* dL_ddepth_std,
 	float* dL_dcov3D,
 	float* dL_dsh,
 	glm::vec3* dL_dscale,
-	glm::vec4* dL_drot)
+	glm::vec4* dL_drot,
+	const float* __restrict__ out_depth,
+	const float* __restrict__ out_depth_std,
+	const float* __restrict__ count_std,
+	const float* __restrict__ std_diff_sum)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P || !(radii[idx] > 0))
@@ -402,6 +407,18 @@ __global__ void preprocessCUDA(
 	// That's the third part of the mean gradient.
 	dL_dmeans[idx] += dL_dmean2;
 
+	// // Compute loss gradient w.r.t. 3D means due to gradients of std of depth
+	// // from rendering procedure
+	// glm::vec3 dL_dmean2_std = glm::vec3(0.0f);
+	// float mul3 = view[2] * m.x + view[6] * m.y + view[10] * m.z + view[14];
+	// dL_dmean2_std.x = (view[2] - view[3] * mul3) * dL_ddepth[idx] * count_std[idx] * out_depth_std[idx] / (std_diff_sum[idx] + 1e-8f);
+	// dL_dmean2_std.y = (view[6] - view[7] * mul3) * dL_ddepth[idx] * count_std[idx] * out_depth_std[idx] / (std_diff_sum[idx] + 1e-8f);
+	// dL_dmean2_std.z = (view[10] - view[11] * mul3) * dL_ddepth[idx] * count_std[idx] * out_depth_std[idx] / (std_diff_sum[idx] + 1e-8f);
+
+	// // That's the fourth part of the mean gradient.
+	// dL_dmeans[idx] += dL_dmean2_std;
+	
+
 	// Compute gradient updates due to computing colors from SHs
 	if (shs)
 		computeColorFromSH(idx, D, M, (glm::vec3*)means, *campos, shs, clamped, (glm::vec3*)dL_dcolor, (glm::vec3*)dL_dmeans, (glm::vec3*)dL_dsh);
@@ -432,7 +449,11 @@ renderCUDA(
 	float4* __restrict__ dL_dconic2D,
 	float* __restrict__ dL_dopacity,
 	float* __restrict__ dL_dcolors,
-	float* __restrict__ dL_ddepths
+	float* __restrict__ dL_ddepths,
+	const float* __restrict__ out_depth,
+	const float* __restrict__ out_depth_std,
+	const float* __restrict__ count_std,
+	const float* __restrict__ std_diff_sum
 )
 {
 	// We rasterize again. Compute necessary block info.
@@ -472,6 +493,7 @@ renderCUDA(
 	float dL_dpixel[C];
 	float accum_depth_rec = 0;
 	float dL_dpixel_depth;
+	float dL_dpixel_depth_std;
 	float accum_alpha_rec = 0;
 	float dL_dalpha;
 	if (inside) {
@@ -479,6 +501,7 @@ renderCUDA(
 			dL_dpixel[i] = dL_dpixels[i * H * W + pix_id];
 		dL_dpixel_depth = dL_dpixel_depths[pix_id];
 		dL_dalpha = dL_dalphas[pix_id];
+		dL_dpixel_depth_std = dL_dpixel_depth * count_std[pix_id] * out_depth_std[pix_id] / (std_diff_sum[pix_id] + 1e-8f);
 	}
 
 	float last_alpha = 0;
@@ -535,6 +558,8 @@ renderCUDA(
 			const float dchannel_dcolor = alpha * T;
 			const float dpixel_depth_ddepth = alpha * T;
 
+			const float dpixel_depth_std_ddepth = (collected_depths[j] - out_depth[pix_id]) / (out_depth_std[pix_id] * count_std[pix_id] + 1e-8f);
+
 			// Propagate gradients to per-Gaussian colors and keep
 			// gradients w.r.t. alpha (blending factor for a Gaussian/pixel
 			// pair).
@@ -561,6 +586,13 @@ renderCUDA(
 			last_depth = c_d;
 			dL_dopa += (c_d - accum_depth_rec) * dL_dpixel_depth;
 			atomicAdd(&(dL_ddepths[global_id]), dpixel_depth_ddepth * dL_dpixel_depth);
+
+			// Propagate gradients from pixel depth std to opacity
+			const float c_d = collected_depths[j];
+			accum_depth_rec = last_alpha * last_depth + (1.f - last_alpha) * accum_depth_rec;
+			last_depth = c_d;
+			dL_dopa += (c_d - accum_depth_rec) * dL_dpixel_depth_std;
+			atomicAdd(&(dL_ddepths[global_id]), dpixel_depth_std_ddepth * dL_dpixel_depth_std);
 
 			// Propagate gradients from pixel alpha (weights_sum) to opacity
 			accum_alpha_rec = last_alpha + (1.f - last_alpha) * accum_alpha_rec;
@@ -623,7 +655,11 @@ void BACKWARD::preprocess(
 	float* dL_dcov3D,
 	float* dL_dsh,
 	glm::vec3* dL_dscale,
-	glm::vec4* dL_drot)
+	glm::vec4* dL_drot,
+	const float* out_depth 
+	const float* out_depth_std,
+	const float*  count_std,
+	const float*  std_diff_sum)
 {
 	// Propagate gradients for the path of 2D conic matrix computation. 
 	// Somewhat long, thus it is its own kernel rather than being part of 
@@ -665,7 +701,11 @@ void BACKWARD::preprocess(
 		dL_dcov3D,
 		dL_dsh,
 		dL_dscale,
-		dL_drot);
+		dL_drot, 
+		out_depth,
+		out_depth_std,
+		count_std,
+		std_diff_sum);
 }
 
 void BACKWARD::render(
@@ -687,7 +727,11 @@ void BACKWARD::render(
 	float4* dL_dconic2D,
 	float* dL_dopacity,
 	float* dL_dcolors,
-	float* dL_ddepths)
+	float* dL_ddepths, 
+	const float* out_depth,
+	const float* out_depth_std,
+	const float*  count_std,
+	const float*  std_diff_sum)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> >(
 		ranges,
@@ -707,6 +751,10 @@ void BACKWARD::render(
 		dL_dconic2D,
 		dL_dopacity,
 		dL_dcolors,
-		dL_ddepths
+		dL_ddepths,
+		out_depth,
+		out_depth_std,
+		count_std,
+		std_diff_sum
 		);
 }

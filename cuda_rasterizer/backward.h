@@ -64,7 +64,11 @@ namespace BACKWARD
 		float* dL_dcov3D,
 		float* dL_dsh,
 		glm::vec3* dL_dscale,
-		glm::vec4* dL_drot);
+		glm::vec4* dL_drot,
+		const float* out_depth,
+		const float* out_depth_std,
+		const float*  count_std,
+		const float*  std_diff_sum);
 }
 
 #endif

@@ -67,6 +67,9 @@ RasterizeGaussiansCUDA(
 
   torch::Tensor out_color = torch::full({NUM_CHANNELS, H, W}, 0.0, float_opts);
   torch::Tensor out_depth = torch::full({1, H, W}, 0.0, float_opts);
+  torch::Tensor out_std = torch::full({1, H, W}, 0.0, float_opts);
+  torch::Tensor count_std = torch::full({1, H, W}, 0.0, float_opts);
+  torch::Tensor std_diff_sum = torch::full({1, H, W}, 0.0, float_opts);
   torch::Tensor out_alpha = torch::full({1, H, W}, 0.0, float_opts);
   torch::Tensor radii = torch::full({P}, 0, means3D.options().dtype(torch::kInt32));
   
@@ -111,11 +114,14 @@ RasterizeGaussiansCUDA(
 		prefiltered,
 		out_color.contiguous().data<float>(),
 		out_depth.contiguous().data<float>(),
+		out_depth_std.contiguous().data<float>(),
+		count_std.contiguous().data<float>(),
+		std_diff_sum.contiguous().data<float>(),
 		out_alpha.contiguous().data<float>(),
 		radii.contiguous().data<int>(),
 		debug);
   }
-  return std::make_tuple(rendered, out_color, out_depth, out_alpha, radii, geomBuffer, binningBuffer, imgBuffer);
+  return std::make_tuple(rendered, out_color, out_depth, out_depth_std, count_std, std_diff_sum, out_alpha, radii, geomBuffer, binningBuffer, imgBuffer);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
@@ -143,6 +149,10 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const torch::Tensor& binningBuffer,
 	const torch::Tensor& imageBuffer,
 	const torch::Tensor& alphas,
+	const torch::Tensor& out_depth,
+	const torch::Tensor& out_depth_std,
+	const torch::Tensor& count_std,
+	const torch::Tensor& std_diff_sum,
 	const bool debug) 
 {
   const int P = means3D.size(0);
@@ -201,6 +211,10 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	  dL_dsh.contiguous().data<float>(),
 	  dL_dscales.contiguous().data<float>(),
 	  dL_drotations.contiguous().data<float>(),
+	  out_depth.contiguous().data<float>(),
+	  out_depth_std.contiguous().data<float>(),
+	  count_std.contiguous().data<float>(),
+	  std_diff_sum.contiguous().data<float>(),
 	  debug);
   }
 

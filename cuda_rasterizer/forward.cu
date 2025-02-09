@@ -272,7 +272,10 @@ renderCUDA(
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color,
-	float* __restrict__ out_depth)
+	float* __restrict__ out_depth,
+	float* __restrict__ out_depth_std,
+	float* __restrict__ std_diff_sum,
+	float* __restrict__ count_std)
 {
 	// Identify current tile and associated min/max pixel range.
 	auto block = cg::this_thread_block();
@@ -305,6 +308,7 @@ renderCUDA(
 	float C[CHANNELS] = { 0 };
 	float weight = 0;
 	float D = 0;
+	float std_D = 0;
 
 	// Iterate over batches until all done or range is complete
 	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE)
@@ -366,6 +370,19 @@ renderCUDA(
 			// pixel.
 			last_contributor = contributor;
 		}
+
+		float sum_squared_diff = 0.0f;
+		float neg_diff_sum = 0.0f;
+		float count_temp = 0.0f;
+
+		for (int j = 0; !done && j < min(BLOCK_SIZE, toDo); j++) {
+			float diff = depths[collected_id[j]] - D;
+			sum_squared_diff += diff * diff;
+			neg_diff_sum += -diff;
+			count_temp += 1.0f;
+		}
+
+		std_D = sqrtf(sum_squared_diff / count);
 	}
 
 	// All threads that treat valid pixel write out their final
@@ -377,6 +394,9 @@ renderCUDA(
 			out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
 		out_alpha[pix_id] = weight; //1 - T;
 		out_depth[pix_id] = D;
+		out_depth_std[pix_id] = std_D;
+		count_std[pix_id] = count_temp;
+		std_diff_sum[pix_id] = neg_diff_sum;
 	}
 }
 
@@ -393,7 +413,10 @@ void FORWARD::render(
 	uint32_t* n_contrib,
 	const float* bg_color,
 	float* out_color,
-	float* out_depth)
+	float* out_depth,
+	float* out_depth_std,
+	float* count_std,
+	float* std_diff_sum)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
 		ranges,
@@ -407,7 +430,10 @@ void FORWARD::render(
 		n_contrib,
 		bg_color,
 		out_color,
-		out_depth);
+		out_depth,
+		out_depth_std,
+		count_std,
+		std_diff_sum);
 }
 
 void FORWARD::preprocess(int P, int D, int M,

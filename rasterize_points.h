@@ -62,6 +62,10 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const torch::Tensor& binningBuffer,
 	const torch::Tensor& imageBuffer,
 	const torch::Tensor& alpha,
+	const torch::Tensor& out_depth,
+	const torch::Tensor& out_depth_std,
+	const torch::Tensor& count_std,
+	const torch::Tensor& std_diff_sum,
 	const bool debug);
 		
 torch::Tensor markVisible(
