@@ -341,7 +341,7 @@ int CudaRasterizer::Rasterizer::forward(
 		count_std,
 		std_diff_sum), debug);
 
-	return num_rendered;
+	return num_rendered, out_depth, out_depth_std, count_std, std_diff_sum;
 }
 
 // Produce necessary gradients for optimization, corresponding
