@@ -656,10 +656,10 @@ void BACKWARD::preprocess(
 	float* dL_dsh,
 	glm::vec3* dL_dscale,
 	glm::vec4* dL_drot,
-	const float* out_depth, 
-	const float* out_depth_std,
-	const float*  count_std,
-	const float*  std_diff_sum)
+	float* out_depth, 
+	float* out_depth_std,
+	float*  count_std,
+	float*  std_diff_sum)
 {
 	// Propagate gradients for the path of 2D conic matrix computation. 
 	// Somewhat long, thus it is its own kernel rather than being part of 
